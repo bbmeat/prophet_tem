@@ -100,5 +100,5 @@ fig1.savefig('temp_min_model.png')
 forecast[["ds", "yhat", "yhat_lower", "yhat_upper"]].to_csv('./weather_further_min.csv', index=False)
 
 # Save model
-with open('temp_max_pre.json', 'w') as fout:
+with open('temp_min_pre.json', 'w') as fout:
     json.dump(model_to_json(model), fout)

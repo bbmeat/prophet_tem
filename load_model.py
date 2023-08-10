@@ -21,17 +21,35 @@ def change_arr(arr):
     return arr
 
 
+# get yesterday weather link is weak
+def get_yes_weather():
+    response = requests.get('http://t.weather.itboy.net/api/weather/city/101030100')
+    pattern = r'\d+'
+    data = json.loads(response.text)
+    # print(data)
+    temp_data = data["data"]
+    yes_data = temp_data['yesterday']
+    yes_temp_max = yes_data['high']
+    yes_temp_min = yes_data['low']
+
+    temp_max = re.findall(pattern, yes_temp_max)[0]
+    temp_min = re.findall(pattern, yes_temp_min)[0]
+    return temp_max, temp_min
+
+
+# get sensor max and min data
 def get_sensor_data():
     now = datetime.datetime.now()
     yest = now + datetime.timedelta(days=-1)
     name = 'C364C4251B5A3625'
     startTime = yest.strftime('%Y-%m-%d')
-    # print(startTime)
     endTime = yest.strftime('%Y-%m-%d')
+    yestTime = yest.strftime('%Y/%m/%d')
     pageNum = 1
     pageSize = 500
     response = requests.get(
-        f'http://192.168.30.80:8082/api/storage/data/sac/history?name={name}&startTime={startTime}&endTime={endTime}&pageNum={pageNum}&pageSize={pageSize}')
+        f'http://192.168.30.80:8082/api/storage/data/sac/history?name={name}&startTime={startTime}&endTime={endTime}&pageNum={pageNum}&pageSize={pageSize}'
+    )
     data = json.loads(response.text)
     sensor_data_all = data["data"][0]
     sensor_data_list = sensor_data_all["sdlist"]
@@ -44,8 +62,30 @@ def get_sensor_data():
     sensor_temp_max = max(sensor_temp)
     sensor_temp_min = min(sensor_temp)
     print("max", sensor_temp_max, "min:", sensor_temp_min)
+    return yestTime, sensor_temp_max, sensor_temp_min
 
 
+# create data to fit new model
+def create_fit_data():
+    # get yesterday weather
+    temp = get_yes_weather()
+    sensor_data = get_sensor_data()
+    # create fit data
+    temp_max_f = pd.DataFrame({
+        'ds': sensor_data[0],
+        'y': sensor_data[1],
+        'temp_max': temp[0],
+    })
+
+    temp_min_f = pd.DataFrame({
+        'ds': sensor_data[0],
+        'y': sensor_data[2],
+        'temp_min': temp[1],
+    })
+    return temp_max_f, temp_min_f
+
+
+# get future weather in 7days
 def search_weather():
     location = '101010100'
     key = 'd396c8b70d804c40a0f7a0a5593f017c'
@@ -62,22 +102,18 @@ def search_weather():
         date_weather = weather_data[i]["fxDate"]
         date_temp_max = weather_data[i]["tempMax"]
         date_temp_min = weather_data[i]["tempMin"]
-        date.append(date_weather)
+        d = date_weather.replace("-", "/")
+        date.append(d)
         temp_max.append(date_temp_max)
         temp_min.append(date_temp_min)
 
-    date = change_arr(date)
+    date = change_arr(date).replace('-', '/')
     temp_max = change_arr(temp_max)
     temp_min = change_arr(temp_min)
     print(len(date))
-    y = np.zeros(len(date))
-    # print(date)
-    # print(temp_max)
-    # print(temp_min)
-    # print(y)
+    print(date)
     temp_data = pd.DataFrame({
         'ds': date,
-        'y': y,
         'temp_max': temp_max,
         'temp_min': temp_min,
     })
@@ -91,12 +127,17 @@ def load_model(model_file):
     return m
 
 
+def save_new_model(model, model_file):
+    with open(model_file, 'w') as fout:
+        json.dump(model_to_json(model), fout)
+
 def plt_set():
     mpl.rcParams['font.sans-serif'] = ['KaiTi']
     mpl.rcParams['font.serif'] = ['KaiTi']
     mpl.rcParams['axes.unicode_minus'] = False  # 用来正常显示负号
 
 
+# judge model type
 def is_in(file_name, key_word):
     # Pair keywords using regular matching
     if re.findall(key_word, file_name):
@@ -168,6 +209,16 @@ def main():
     data = get_data(min_data_file)
     # predict(max_model, data, max_model_file)
     predict(min_model, data, min_model_file)
+    temp_data = create_fit_data()
+    # fit new model
+    # max temp model
+    max_model_n = Prophet().fit(temp_data[0], init=model_init(max_model))
+    min_model_n = Prophet().fit(temp_data[1], init=model_init(min_model))
+
+    # save model
+    model_time = datetime.datetime.now().strftime('%Y%m%d')
+    max_model_file_path = f'./model/{model_time}_max.json'
+    min_model_file_path = f'./model/{model_time}_min.json'
 
 
 if __name__ == "__main__":
